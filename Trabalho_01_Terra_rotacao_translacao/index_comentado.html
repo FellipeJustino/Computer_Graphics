@@ -1,1 +1,339 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Terra — Computação Gráfica</title>
 
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body { background: #000; overflow: hidden; font-family: 'Courier New', monospace; }
+
+    canvas { display: block; }
+
+    #info {
+      position: absolute;
+      top: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      color: #aee6ff;
+      text-align: center;
+      pointer-events: none;
+      text-shadow: 0 0 12px #00bfff88;
+    }
+    #info h1 { font-size: 1.2rem; letter-spacing: 3px; text-transform: uppercase; }
+    #info p  { font-size: 0.75rem; opacity: 0.6; margin-top: 4px; }
+
+    #painel {
+      position: absolute;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      gap: 24px;
+      color: #aee6ff;
+      font-size: 0.75rem;
+      background: rgba(0,20,40,0.6);
+      border: 1px solid #00bfff44;
+      border-radius: 8px;
+      padding: 10px 20px;
+    }
+    
+    .stat span { display: block; opacity: 0.5; font-size: 0.65rem; }
+
+    #controles {
+      position: absolute;
+      top: 20px;
+      right: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      color: #aee6ff;
+      font-size: 0.72rem;
+    }
+    .ctrl-row { display: flex; align-items: center; gap: 8px; }
+    .ctrl-row label { width: 110px; opacity: 0.7; }
+    
+    input[type=range] { accent-color: #00bfff; width: 100px; }
+  </style>
+</head>
+<body>
+
+<div id="info">
+  <h1>🌍 Sistema Terra–Sol</h1>
+  <p>Computação Gráfica · Three.js · Translação &amp; Rotação</p>
+</div>
+
+<div id="controles">
+  <div class="ctrl-row">
+    <label>Velocidade Rotação</label>
+    <input type="range" id="slRotacao" min="0" max="5" step="0.1" value="1">
+  </div>
+  <div class="ctrl-row">
+    <label>Velocidade Translação</label>
+    <input type="range" id="slTranslacao" min="0" max="5" step="0.1" value="1">
+  </div>
+  <div class="ctrl-row">
+    <label>Raio da Órbita</label>
+    <input type="range" id="slOrbita" min="3" max="12" step="0.5" value="6">
+  </div>
+</div>
+
+<div id="painel">
+  <div class="stat">Ângulo Órbita: <span id="stAngulo">0°</span></div>
+  <div class="stat">Rot. Própria: <span id="stRotacao">0°</span></div>
+  <div class="stat">Posição X: <span id="stX">0</span></div>
+  <div class="stat">Posição Z: <span id="stZ">0</span></div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
+<script>
+const scene = new THREE.Scene();
+
+const camera = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.1, 1000);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(innerWidth, innerHeight);
+renderer.setPixelRatio(devicePixelRatio);
+document.body.appendChild(renderer.domElement);
+
+camera.position.set(0, 8, 14);
+camera.lookAt(0, 0, 0);
+
+const starGeo = new THREE.BufferGeometry();
+const starCount = 3000;
+const starPos = new Float32Array(starCount * 3);
+
+for (let i = 0; i < starCount * 3; i++) {
+  starPos[i] = (Math.random() - 0.5) * 400;
+}
+
+starGeo.setAttribute('position', new THREE.BufferAttribute(starPos, 3));
+const starMat = new THREE.PointsMaterial({ color: 0xffffff, size: 0.3 });
+scene.add(new THREE.Points(starGeo, starMat));
+
+const solGeo = new THREE.SphereGeometry(1.4, 32, 32);
+const solMat = new THREE.MeshStandardMaterial({
+  color: 0xffdd44,
+  emissive: 0xffaa00,
+  emissiveIntensity: 1.2,
+  roughness: 0.8,
+});
+
+const sol = new THREE.Mesh(solGeo, solMat);
+scene.add(sol);
+
+const luzSol = new THREE.PointLight(0xfff0cc, 3, 60);
+scene.add(luzSol);
+
+const luzAmbiente = new THREE.AmbientLight(0x112244, 0.5);
+scene.add(luzAmbiente);
+
+const haloGeo = new THREE.SphereGeometry(1.7, 32, 32);
+const haloMat = new THREE.MeshBasicMaterial({
+  color: 0xffee88,
+  transparent: true,
+  opacity: 0.08,
+});
+sol.add(new THREE.Mesh(haloGeo, haloMat));
+
+let orbitaRadius = 6;
+
+function criarOrbitaLine(r) {
+  const pts = [];
+
+  for (let i = 0; i <= 128; i++) {
+    const a = (i / 128) * Math.PI * 2;
+    pts.push(new THREE.Vector3(Math.cos(a) * r, 0, Math.sin(a) * r));
+  }
+
+  const geo = new THREE.BufferGeometry().setFromPoints(pts);
+
+  return new THREE.Line(geo, new THREE.LineBasicMaterial({
+    color: 0x2255aa,
+    opacity: 0.35,
+    transparent: true,
+  }));
+}
+
+let orbitaLine = criarOrbitaLine(orbitaRadius);
+scene.add(orbitaLine);
+
+function gerarTexturaTerra(size = 512) {
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = size;
+  const ctx = canvas.getContext('2d');
+
+  ctx.fillStyle = '#1a4e8a';
+  ctx.fillRect(0, 0, size, size);
+
+  const continentes = [
+    { x: 0.18, y: 0.30, rx: 0.07, ry: 0.15, rot: -0.3 },
+    { x: 0.22, y: 0.55, rx: 0.05, ry: 0.12, rot:  0.2 },
+    { x: 0.52, y: 0.30, rx: 0.06, ry: 0.10, rot:  0   },
+    { x: 0.54, y: 0.52, rx: 0.07, ry: 0.16, rot:  0.1 },
+    { x: 0.70, y: 0.28, rx: 0.16, ry: 0.12, rot:  0   },
+    { x: 0.78, y: 0.60, rx: 0.06, ry: 0.04, rot:  0.2 },
+    { x: 0.50, y: 0.92, rx: 0.50, ry: 0.06, rot:  0   },
+  ];
+
+  continentes.forEach(c => {
+    ctx.save();
+    ctx.translate(c.x * size, c.y * size);
+    ctx.rotate(c.rot);
+
+    const grd = ctx.createRadialGradient(0, 0, 0, 0, 0, c.rx * size);
+    grd.addColorStop(0,   '#3a8c3a');
+    grd.addColorStop(0.5, '#2d7a2d');
+    grd.addColorStop(1,   'transparent');
+
+    ctx.fillStyle = grd;
+    ctx.scale(1, c.ry / c.rx);
+    ctx.beginPath();
+    ctx.arc(0, 0, c.rx * size, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.restore();
+  });
+
+  [{ y: 0, h: 0.08 }, { y: 0.92, h: 0.08 }].forEach(cap => {
+    const grd = ctx.createLinearGradient(0, cap.y * size, 0, (cap.y + cap.h) * size);
+    grd.addColorStop(0, 'rgba(230,240,255,0.9)');
+    grd.addColorStop(1, 'rgba(200,220,255,0)');
+    ctx.fillStyle = grd;
+    ctx.fillRect(0, cap.y * size, size, cap.h * size);
+  });
+
+  ctx.globalAlpha = 0.25;
+  ctx.fillStyle = '#ffffff';
+  for (let i = 0; i < 60; i++) {
+    const cx = Math.random() * size;
+    const cy = Math.random() * size;
+    const r  = 10 + Math.random() * 30;
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+
+  return new THREE.CanvasTexture(canvas);
+}
+
+const terraTex = gerarTexturaTerra();
+
+const terraGeo = new THREE.SphereGeometry(1, 64, 64);
+
+const terraMat = new THREE.MeshStandardMaterial({
+  map: terraTex,
+  roughness: 0.85,
+  metalness: 0.05,
+});
+
+const terra = new THREE.Mesh(terraGeo, terraMat);
+
+terra.rotation.z = THREE.MathUtils.degToRad(23.5);
+
+scene.add(terra);
+
+const atmoGeo = new THREE.SphereGeometry(1.06, 64, 64);
+const atmoMat = new THREE.MeshStandardMaterial({
+  color: 0x4499ff,
+  transparent: true,
+  opacity: 0.10,
+  roughness: 1,
+  side: THREE.FrontSide,
+});
+terra.add(new THREE.Mesh(atmoGeo, atmoMat));
+
+const slRotacao    = document.getElementById('slRotacao');
+const slTranslacao = document.getElementById('slTranslacao');
+const slOrbita     = document.getElementById('slOrbita');
+
+slOrbita.addEventListener('input', () => {
+  orbitaRadius = parseFloat(slOrbita.value);
+  scene.remove(orbitaLine);
+  orbitaLine = criarOrbitaLine(orbitaRadius);
+  scene.add(orbitaLine);
+});
+
+let anguloOrbita  = 0;
+let anguloRotacao = 0;
+
+let isDragging = false;
+let prevX = 0, prevY = 0;
+
+let camTheta = Math.PI / 6;
+let camPhi   = 0.8;
+let camDist  = 14;
+
+renderer.domElement.addEventListener('mousedown', e => {
+  isDragging = true;
+  prevX = e.clientX;
+  prevY = e.clientY;
+});
+
+window.addEventListener('mouseup', () => isDragging = false);
+
+window.addEventListener('mousemove', e => {
+  if (!isDragging) return;
+
+  camPhi   -= (e.clientX - prevX) * 0.005;
+  camTheta -= (e.clientY - prevY) * 0.005;
+
+  camTheta = Math.max(0.1, Math.min(Math.PI / 2, camTheta));
+
+  prevX = e.clientX;
+  prevY = e.clientY;
+});
+
+renderer.domElement.addEventListener('wheel', e => {
+  camDist = Math.max(5, Math.min(25, camDist + e.deltaY * 0.02));
+});
+
+const stAngulo  = document.getElementById('stAngulo');
+const stRotacao = document.getElementById('stRotacao');
+const stX       = document.getElementById('stX');
+const stZ       = document.getElementById('stZ');
+
+function animate() {
+  requestAnimationFrame(animate);
+
+  const velRot   = parseFloat(slRotacao.value)    * 0.005;
+  const velTrans = parseFloat(slTranslacao.value) * 0.003;
+
+  anguloOrbita += velTrans;
+
+  terra.position.x = Math.cos(anguloOrbita) * orbitaRadius;
+  terra.position.z = Math.sin(anguloOrbita) * orbitaRadius;
+
+  anguloRotacao += velRot;
+  terra.rotation.y = anguloRotacao;
+
+  camera.position.x = Math.sin(camPhi) * Math.cos(camTheta) * camDist;
+  camera.position.y = Math.sin(camTheta) * camDist;
+  camera.position.z = Math.cos(camPhi) * Math.cos(camTheta) * camDist;
+
+  camera.lookAt(0, 0, 0);
+
+  stAngulo.textContent  = (THREE.MathUtils.radToDeg(anguloOrbita)  % 360).toFixed(1) + '°';
+  stRotacao.textContent = (THREE.MathUtils.radToDeg(anguloRotacao) % 360).toFixed(1) + '°';
+  stX.textContent       = terra.position.x.toFixed(2);
+  stZ.textContent       = terra.position.z.toFixed(2);
+
+  renderer.render(scene, camera);
+}
+
+animate();
+
+window.addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+
+  renderer.setSize(innerWidth, innerHeight);
+});
+
+</script>
+</body>
+</html>
